@@ -1,0 +1,150 @@
+---
+- name: install and enable TLSv1.2 for Server 2008 and 2008 R2
+  block:
+  - name: enable TLSv1.2 support for Server 2008 and 2008 R2
+    win_regedit:
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\{{ item.type }}
+      name: '{{ item.property }}'
+      data: '{{ item.value }}'
+      type: dword
+      state: present
+    register: pri_personalise_tls_config
+    when: not (man_is_longhorn and item.type == "Server") # Server 2008 Server impl does not work, only apply the client configuration
+    loop:
+    - type: Server
+      property: Enabled
+      value: 1
+    - type: Server
+      property: DisabledByDefault
+      value: 0
+    - type: Client
+      property: Enabled
+      value: 1
+    - type: Client
+      property: DisabledByDefault
+      value: 0
+
+  - name: reboot if TLS config was applied
+    win_reboot:
+    when: pri_personalise_tls_config is changed
+  when: man_host_type == '2008r2'
+
+- name: set show hidden files/folders and file extensions for the default user profile
+  win_regedit:
+    path: HKLM:\ANSIBLE\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+    name: '{{ item.name }}'
+    data: '{{ item.data }}'
+    type: dword
+    state: present
+    hive: C:\Users\Default\NTUSER.dat
+  loop:
+  - name: Hidden
+    data: 1
+  - name: HideFileExt
+    data: 0
+
+- name: set This PC as the default view for Windows Explorer for the default user profile
+  win_regedit:
+    path: HKLM:\ANSIBLE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+    name: LaunchTo
+    data: 1
+    type: dword
+    state: present
+    hive: C:\Users\Default\NTUSER.dat
+  when:  # this is only valid for 2016/10+
+  - man_host_type != '2008r2'
+  - man_host_type != '2012r2'
+
+- name: set show hidden files/folders and file extensions for the current user profile
+  win_regedit:
+    path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+    name: '{{ item.name }}'
+    data: '{{ item.data }}'
+    type: dword
+    state: present
+  loop:
+  - name: Hidden
+    data: 1
+  - name: HideFileExt
+    data: 0
+
+- name: set This PC as the default view for Windows Explorer for the current user profile
+  win_regedit:
+    path: HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+    name: LaunchTo
+    data: 1
+    type: dword
+    state: present
+  when:  # this is only valid for 2016/10+
+  - man_host_type != '2008r2'
+  - man_host_type != '2012r2'
+
+- name: disable automatic updates (prevents TrustedInstaller startup thrash on older images)
+  win_regedit:
+    path: HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU
+    name: NoAutoUpdate
+    data: 1
+    type: dword
+    state: present
+
+- name: ensure Chocolatey itself is installed
+  win_chocolatey:
+    name: chocolatey
+    state: present
+
+- name: Switch off problematic "useEnhancedExitCodes" Chocolatey feature
+  win_chocolatey_feature:
+    name: useEnhancedExitCodes
+    state: disabled
+  when: false
+
+- name: install set Chocolatey packages
+  win_chocolatey:
+    name: '{{ item }}'  # TODO: set list directly here when 2.7 is the min version
+    state: present
+    timeout: 6000
+  ignore_errors: yes  # doesn't matter too much if these fail
+  when:
+  - man_personalize_choco_packages|count > 0
+  - item != ''
+  loop: '{{ man_personalize_choco_packages }}'
+  become: yes
+  vars:  # run with become as we aren't sure what packages the user has specified
+    ansible_become_user: '{{ ansible_user }}'
+    ansible_become_pass: '{{ ansible_password }}'
+
+- name: Put Double Commander shortcut on desktop
+  win_shortcut:
+    src: 'C:\Program Files\Double Commander\doublecmd.exe'
+    dest: 'C:\Users\Public\Desktop\Double Commander.lnk'
+  when: '"doublecmd" in man_personalize_choco_packages'
+
+- name: Copy some nice and comfy Double Commander configuration
+  win_copy:
+    src: doublecmd.xml
+    dest: 'C:\Program Files\Double Commander\'
+  when: '"doublecmd" in man_personalize_choco_packages'
+
+- name: Put Notepad plus plus shortcut on desktop
+  win_shortcut:
+    src: 'C:\Program Files\Notepad++\notepad++.exe'
+    dest: 'C:\Users\Public\Desktop\Notepad++.lnk'
+  when: '"notepadplusplus" in man_personalize_choco_packages'
+
+- name: Put sysinternals folder shortcut on desktop
+  win_shortcut:
+    src: C:\ProgramData\chocolatey\lib\sysinternals\tools
+    dest: C:\Users\Public\Desktop\Sysinternals.lnk
+    icon: C:\ProgramData\chocolatey\lib\sysinternals\tools\procexp64.exe,0
+  when: '"sysinternals" in man_personalize_choco_packages'
+
+- name: Disable password expiry on Ansible user account
+  win_user:
+    name: '{{ ansible_user }}'
+    password_never_expires: true
+
+- name: Disable Administrator account
+  win_user:
+    name: Administrator
+    account_disabled: true
+

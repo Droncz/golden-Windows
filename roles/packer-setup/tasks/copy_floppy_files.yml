@@ -1,0 +1,73 @@
+# Copy files used in the bootstrapping process and handed over to the VM 
+###  - as floppy files if there are no "bootstrap_files" defined
+#  - as CD if there are (size wouldn't fit to floppy image)
+---
+- name: create the folder for bootstrap floppy files
+  file:
+    path: '{{ man_host_type }}/files'
+    state: directory
+
+- name: Set bootstrap drive letter when VMware vSphere
+  set_fact:
+    # pri_packer_setup_bootstrap_drive: "A"
+    pri_packer_setup_bootstrap_drive: "F"
+  when: packer_builder == "vsphere"
+
+- name: Set bootstrap drive letter when Hyper-V
+  set_fact:
+    pri_packer_setup_bootstrap_drive: "E"
+  when: packer_builder == "hyperv"
+
+- name: Make note for the template we are NOT in sysprep phase
+  set_fact:
+    sysprep_phase: false
+
+- name: Template the Autounattend.xml file
+  template:
+    dest: "{{ man_host_type }}/files/Autounattend.xml"
+    src: "{{ playbook_dir }}/config/master-unattend.xml.j2"
+  register: pri_packer_setup_template_atte_res
+
+
+- name: Template the bootstrap.ps1 file
+  template:
+    dest: "{{ man_host_type }}/files/bootstrap.ps1"
+    src: bootstrap.ps1.j2
+  register: pri_packer_setup_template_boot_res
+
+- name: copy the required bootstrapping files
+  get_url:
+    dest: '{{ man_host_type }}/files/{{ item.file|default() }}'
+    url: '{{ item.url }}'
+    force: no
+  register: pri_packer_setup_bootstrap_download_res
+  with_items: '{{ pri_packer_setup_config.bootstrap_files }}'
+  tags:
+    downloads
+
+- name: create the secondary ISO file
+  command: mkisofs -joliet-long -lU -o {{ man_host_type }}/{{ pri_packer_setup_config.secondary_iso_name }} {{ man_host_type }}/files
+  # when: pri_packer_setup_template_atte_res is changed or pri_packer_setup_template_boot_res is changed or pri_packer_setup_bootstrap_download_res is changed
+  # tags:
+  #   downloads
+
+- name: Copy the secondary ISO file to VMware vSphere datastore
+  vsphere_copy:
+    host: '{{ vsphere_config.hostname }}'
+    login: '{{ vsphere_config.username }}'
+    password: '{{ vsphere_config.password }}'
+    validate_certs: '{{ vsphere_config.validate_certs }}'
+
+    datacenter: '{{ vsphere_config.datacenter }}'
+    datastore: '{{ vsphere_config.datastore }}'
+    path: '{{ vsphere_config.ISOs_folder }}'
+    src: '{{ man_host_type }}/{{ pri_packer_setup_config.secondary_iso_name }}' 
+  # when: packer_builder == "vsphere"
+  # The copying doesnt seem to work :-(
+  # Need to push it manually by SCP
+  when: false
+
+- name: Copy the secondary ISO file with SCP to VMware ESXi
+  shell: "scp {{ man_host_type }}/{{ pri_packer_setup_config.secondary_iso_name }} root@vhost1.arena.white:/vmfs/volumes/5953d1cf-fb041042-e4c6-5cb9019023c4/ISO-RT"
+  # when: false
+

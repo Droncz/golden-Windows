@@ -1,0 +1,28 @@
+CPUs: 2
+cpu_cores: 1
+RAM: 8096
+convert_to_template: true
+
+disk_size: 81920
+disk_thin_provisioned: true
+disk_controller_type: pvscsi
+
+network_card: e1000e
+network: "white-lab-129 [192.168.129.0/24]"
+# network: "white-media [192.168.20.0/24]"
+
+configuration_parameters:
+  smbios.addHostVendor: "TRUE"
+
+# VMware tools file is expected to be under the "ISOs_folder" in "datastore"
+# vmware_tools: windows.iso
+vmware_tools: VMware-tools-windows-10.3.5-10430147.iso
+
+choco_packages: 
+  - sysinternals
+  - notepadplusplus
+  - doublecmd
+  - 7zip.install
+  - winscp.install
+  - neovim
+

@@ -1,0 +1,91 @@
+---
+- name: Process VMware vSphere based VM tasks
+  hosts: localhost
+  gather_facts: no
+  vars: 
+    packer_builder: "{{ hostvars['packer-host']['packer_builder'] }}"
+    man_host_type: "{{ hostvars['packer-host']['man_host_type'] }}"
+  tasks:
+  - name: Include tasks from vmware_config.yaml
+    include_tasks: config/read_vmware_config.yaml
+    when: packer_builder == 'vsphere'
+
+
+- name: setup new Windows box with the latest updates and config
+  hosts: windows !packer-host
+  gather_facts: no
+  pre_tasks:
+  - name: Read the vars prepared in the "packer-setup" step
+    include_vars:
+      file: "{{man_host_type}}/pri_packer_setup_config.yaml"
+      name: pri_packer_setup_config
+
+  - name: fail if mandatory vars are not set
+    assert:
+      that:
+      - ansible_become_method == "runas"
+      - ansible_become_user is defined
+      - packer_builder is defined
+      - man_host_type is defined
+      - man_host_architecture is defined
+      - man_skip_feature_removal is defined
+      - man_personalize_choco_packages is defined
+#      - man_packer_windoze_version is defined
+
+  # Some scripts adopted from "packer-windoze" need this variable
+  - name: Set the variable signalling new Windows OS generations
+    set_fact:
+      man_is_longhorn: false
+
+  - name: make sure the WinRM service is set to auto
+    win_service:
+      name: winrm
+      start_mode: auto
+
+  roles:
+  - role: update
+    tags:
+      update
+  - personalise
+  - role: jborean93.win_openssh
+    opt_openssh_firewall_profiles: domain,private,public
+    opt_openssh_skip_start: True
+    opt_openssh_version: v7.9.0.0p1-Beta
+    tags: 
+      openssh
+  - cleanup-winsxs
+  # Cleaning features is dangerous - it removes installation base needed for adding some features later...
+  # - cleanup-features
+  - cleanup
+  
+  # VMWare customization takes cares of sysprep!
+  #  - sysprep
+
+  post_tasks:
+  - name: Add registry key reparing syprep functionality after the WMF 5.x installation
+    # see: http://blog.buktenica.com/windows-management-framework-breaks-sysprep/
+    # or: https://gist.github.com/TravisEz13/cb0403bc21f1506531d609c2933f1166
+    # or: https://www.mail-archive.com/mssms@lists.myitforum.com/msg17679.html
+    # Excerpt:
+    #   Sysprep Error on Windows 2008 R2 or Windows 7 after installing Windows Management Framework 5.x
+    #   Sysprep fails with (see files C:\Windows\System32\Sysprep\Panther\setupact.log and setuperr.log):
+    #       Sysprep_Generalize_MiStreamProv: RegDeleteValue for target uri failed with error = 2[gle=0x00000002]
+    #       Sysprep_Generalize_MiStreamProv: RegDeleteValue for full payload time failed with error = 2[gle=0x00000002]
+    #   Solution:
+    #       Add the following key to registry:
+    #       [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\StreamProvider] “LastFullPayloadTime”=dword:00000000
+    #   PowerShell command:
+    #       New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\StreamProvider" -Name LastFullPayloadTime -Value 0 -PropertyType DWord -Force  
+    win_regedit:
+      path: 'HKLM:\SOFTWARE\Microsoft\Windows\StreamProvider'
+      name: LastFullPayloadTime
+      data: 0
+      type: dword
+      state: present
+    when: man_host_type == '2008r2'
+
+  - name: Just shutdown now - VMware customization takes care of sysprep
+    win_command: "shutdown /s /t 10"
+
+# TODO: Post-task to remove mounted CD-ROMS!
+

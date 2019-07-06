@@ -1,0 +1,33 @@
+### Info
+
+This is an image based on the evaluation ISO supplied by Microsoft. It has all
+the updates available for the host at the time applied.
+It is expected to be saved as a Template in the VMware datastore/repository and
+cloned _with_ customization. The customization is necessary as it (amongst
+the others) sysprep with generalization which is imperative for correct
+functioning of the cloned image.
+
+Details on how to connect are;
+
+* `username`: {{ansible_user}}
+* `password`: {{ansible_password}}
+* `connector`: winrm
+
+Included programs (by default);
+
+* .NET Framework 4.5.2 or higher
+* Windows Management Framework 5.1 or higher
+* PowerShell v5.1 or higher
+* [Chocolatey](https://chocolatey.org/)
+* [Sysinternals Suite](https://docs.microsoft.com/en-us/sysinternals/downloads/sysinternals-suite)
+* [NeoVim] for Windows (C:\tools\neovim\Neovim\)
+* [WinSCP]
+* [Notepad++]
+* [Double Commander]
+
+Other configurations from the standard image;
+
+* WinRM HTTP and HTTPS listener with Basic and CredSSP enabled
+* [Win32-OpenSSH](https://github.com/PowerShell/Win32-OpenSSH) v7.7.2.0p1-Beta
+* Default Administrator account disabled, password is also `{{ansible_password}}`
+* Hidden files and folders and file extensions are shown by default

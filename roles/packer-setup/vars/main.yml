@@ -1,0 +1,322 @@
+
+pri_packer_setup_builders_info:
+  common:
+    # iso_url: '{{ pri_packer_setup_config.iso_url }}'
+    # iso_checksum: '{{ pri_packer_setup_config.iso_checksum }}'
+    # iso_checksum_type: md5
+    # iso_paths: '{{ pri_packer_setup_config.iso_paths }}'
+    communicator: winrm
+    winrm_username: '{{ ansible_user }}'
+    winrm_password: '{{ ansible_password }}'
+
+    winrm_port: '5985'
+    winrm_timeout: '240m'
+    ## shutdown_command: schtasks.exe /Run /TN "packer-shutdown"
+    # shutdown_command: 'shutdown /s /t 10 /f /d p:4:1 /c "Packer Shutdown"'
+    shutdown_timeout: 15m
+  hyperv:
+    type: hyperv-iso
+    boot_command:
+    - a<enter><wait>a<enter><wait>a<enter><wait>a<enter>
+    boot_wait: 0s
+    cpu: 2
+    generation: '{{ pri_packer_setup_config.hv_generation|int }}'
+    ram_size: 2048
+    secondary_iso_images: 
+    - '{{ man_host_type }}/secondary.iso'
+    switch_name: '{{ opt_packer_setup_hyperv_switch|default("packer-windoze") }}'
+    headless: '{{ opt_packer_setup_headless }}'
+  vsphere:
+    type: vsphere-iso
+    guest_os_type: '{{ pri_packer_setup_config.vsphere_guestid }}'
+    # floppy_files: '{{ man_host_type }}/files'
+    floppy_img_path: "[{{ vsphere_config.datastore }}] {{ vsphere_config.ISOs_folder }}/{{ vsphere_config.pvscsi_drivers_folder }}/{{ pri_packer_setup_config.pvscsi_img_name }}"
+    iso_paths:
+      - "[{{ vsphere_config.datastore }}] {{ vsphere_config.ISOs_folder }}/{{ VM_parameters.os_iso_name }}"
+      - "[{{ vsphere_config.datastore }}] {{ vsphere_config.ISOs_folder }}/{{ VM_parameters.vmware_tools }}"
+      - "[{{ vsphere_config.datastore }}] {{ vsphere_config.ISOs_folder }}/{{ pri_packer_setup_config.secondary_iso_name }}"
+
+    # vcenter_server: '{{ vsphere_config.vcenter_server }}'
+    vcenter_server: '{{ vsphere_config.hostname }}'
+    insecure_connection: '{{ vsphere_config.insecure_connection | default("true") }}'
+    username: '{{ vsphere_config.username }}'
+    password: '{{ vsphere_config.password }}'
+    cluster: '{{ vsphere_config.cluster }}'
+    datastore: '{{ vsphere_config.datastore }}'
+    host: '{{ vsphere_config.host }}'
+    folder: '{{ vsphere_config.folder }}'
+
+    vm_name: '{{ VM_parameters.vm_name | mandatory }}'
+    CPUs: '{{ VM_parameters.CPUs | default(1) }}'
+    cpu_cores: '{{ VM_parameters.cpu_cores | default(2) }}'
+    RAM: '{{ VM_parameters.RAM | default(8096) }}'
+    disk_controller_type: '{{ VM_parameters.disk_controller_type | default("pvscsi") }}'
+    disk_size: '{{ VM_parameters.disk_size | default(100000) }}'
+    disk_thin_provisioned: '{{ VM_parameters.disk_thin_provisioned | default("true") }}'
+    network_card: '{{ VM_parameters.network_card | default("e1000") }}'
+    network: '{{ VM_parameters.network | mandatory }}'
+    configuration_parameters: '{{ VM_parameters.configuration_parameters }}'
+    convert_to_template: '{{ VM_parameters.convert_to_template | default("true") }}'
+
+
+pri_packer_setup_provisioners_info:
+  common: {}
+  hyperv:
+  # get the IP address of the host and store it as a file
+  - type: powershell
+    inline: 
+    - (Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True")[0].IPAddress[0] | Set-Content -Path C:\temp\ip.txt
+  # get the file that contains the IP address locally
+  - type: file
+    source: C:\temp\ip.txt
+    destination: '{{ man_host_type }}/hyper-v-ip.txt'
+    direction: download
+  # replace the IP in the Ansible inventory with the real IP
+  - type: shell-local
+    script: '{{ man_host_type }}\configure-hyperv-network.ps1'
+    execute_command:
+    - powershell.exe
+    - -ExecutionPolicy
+    - ByPass
+    - -File
+    - '{% raw %}{{ "{{" }}.Script{{ "}}" }}{% endraw %}'
+  - type: shell-local
+    # Packer creates a tmp script for command which won't work for bash.exe -ic, we set the actual command we want to
+    # use in execute_command and have a dummy value here
+    command: dummy
+    execute_command:
+    - bash.exe
+    - -ic
+    - ansible-playbook main.yml -i {{ man_host_type }}/hosts.ini -vv
+  vsphere:
+    # Taken from the virtualbox (deleted) part
+    ## type: shell-local
+    ## command: ansible-playbook main.yml -i {{ man_host_type }}/hosts.ini -vv
+    type: ansible
+    command: "/usr/home/psvika/IaaC/golden-Windows/call_ansible.sh"
+    inventory_file: "{{ man_host_type }}/hosts.ini"
+    playbook_file: main.yml
+    # extra_arguments: [ "-vv" ]
+    # extra_arguments: 
+    # - "--skip-tags"
+    # - "update"
+
+
+pri_packer_setup_post_processors_info:
+  common: 
+    type: shell-local
+    inline: 
+      - "echo foo"
+  hyperv: {}
+  vsphere: {}
+
+
+pri_packer_setup_json:
+  builders:
+    - '{{ pri_packer_setup_builders }}'
+  provisioners:
+    - '{{ pri_packer_setup_provisioners }}'
+  post-processors:
+    - '{{ pri_packer_setup_post_processors }}'
+
+
+
+# host settings like url's, checksums, vbox types, etc
+#   iso_url: The URL of the evaluation ISO
+#   iso_checksum: The md5 checksum of the evaluation ISO
+
+#   VirtualBox specifics for the host
+#   vb_guest_os_type: The VirtualBox guest os type used when builing the VM, run 'VBoxManage list ostypes' to get a valid list
+#   vb_forwarded_port: The port to set on 127.0.0.1 that will forward to port 5986 on the Windows host, this should be unique
+
+#   Hyper-V specific for the host
+#   hv_generation: The Hyper-V generation to use for the OS, either 1 or 2
+
+#   Host Information generic to the Ansible setup
+#   iso_wim_label: The WIM Name on the install ISO of the edition to install
+#   architecture: The architecture of the build (x86 or amd64) for the answer file
+#   answer_longhorn: Whether the host type will use the older Server 2008 answer file
+#   product_key: The KMS product key required in setup, only used in Server 2008 answer file
+#   box_tag: This is the box tag that I use, this can be overriden with opt_packer_setup_box_tag
+#   driver_host_string: The host string name used for the Virtio drivers
+#   bootstrap_files: A list of dictionaries that contains files to download for use in the bootstrapping process, this also modifies the bootstrapping script
+pri_packer_setup_host_config:
+  # host pattern <osname-[architecture]-[option]> where architecture and option
+  # are optional and will default to x64 and minimal by default
+
+  '2008r2':
+    box_tag: WindowsServer2008r2
+    iso_url: https://download.microsoft.com/download/7/5/E/75EC4E54-5B02-42D6-8879-D8D3A25FBEF7/7601.17514.101119-1850_x64fre_server_eval_en-us-GRMSXEVAL_EN_DVD.iso
+    iso_checksum: 4263be2cf3c59177c45085c0a7bc6ca5
+
+    hv_generation: 1
+    vsphere_guestid: windows7Server64Guest
+
+    iso_wim_label: Windows Server 2008 R2 SERVERSTANDARD
+    architecture: amd64
+    answer_longhorn: no
+    driver_host_string: 2k8R2
+    product_key: '{{ VM_parameters.product_key | default() }}'
+    secondary_iso_name: "{{ VM_parameters.vm_name | mandatory }}-install_support.iso"
+    pvscsi_img_name: "pvscsi-WindowsVista.flp"
+    bootstrap_files:
+#    - name: .NET v4.5
+#      url: http://download.microsoft.com/download/B/A/4/BA4A7E71-2906-4B2D-A0E1-80CF16844F5F/dotNetFx45_Full_x86_x64.exe
+#      arguments: /q /norestart
+    - name: .NET v4.5.2
+      url: https://go.microsoft.com/fwlink/?LinkId=397708
+      file: NDP452-KB2901907-x86-x64-AllOS-ENU.exe
+      arguments: /q /norestart
+    - name: Windows Management Framework v5.1
+      url: https://go.microsoft.com/fwlink/?linkid=839523
+      file: Win7AndW2K8R2-KB3191566-x64.zip
+      action: install-zip
+      # zip_file_pattern: 'Install-Wmf5.1.ps1'
+      # arguments: /AcceptEULA
+      zip_file_pattern: Win7AndW2K8R2-KB3191566-x64.msu
+
+#     - name: PowerShell v3
+#       url: https://download.microsoft.com/download/E/7/6/E76850B8-DA6E-4FF5-8CCE-A24FC513FD16/Windows6.1-KB2506143-x64.msu
+#     - name: WMFv3 Memory Hotfix
+#       action: install-zip
+#       zip_file_pattern: '*KB2842230*.msu'
+#       file: KB2842230-wmfv3.zip
+#       url: https://hotfixv4.trafficmanager.net/Windows%207/Windows%20Server2008%20R2%20SP1/sp2/Fix467402/7600/free/463984_intl_x64_zip.exe
+    - name: Latest Windows Update Version
+      url: http://download.windowsupdate.com/windowsupdate/redist/standalone/7.6.7600.320/windowsupdateagent-7.6-x64.exe
+    - name: Servicing Stack Update
+      url: https://download.microsoft.com/download/F/D/3/FD3728D5-0D2F-44A6-B7DA-1215CC0C9B75/Windows6.1-KB3020369-x64.msu
+    - name: Update Rollup
+      url: http://download.windowsupdate.com/d/msdownload/update/software/updt/2016/05/windows6.1-kb3125574-v4-x64_2dafb1d203c8964239af3048b5dd4b1264cd93b9.msu
+
+
+  '2012r2':
+    box_tag: WindowsServer2012r2
+    iso_url: https://download.microsoft.com/download/6/2/A/62A76ABB-9990-4EFC-A4FE-C7D698DAEB96/9600.17050.WINBLUE_REFRESH.140317-1640_X64FRE_SERVER_EVAL_EN-US-IR3_SSS_X64FREE_EN-US_DV9.ISO
+    iso_checksum: 5b5e08c490ad16b59b1d9fab0def883a
+
+    hv_generation: 2
+    vsphere_guestid: windows8Server64Guest
+
+    iso_wim_label: Windows Server 2012 R2 SERVERSTANDARD
+    architecture: amd64
+    answer_longhorn: no
+    driver_host_string: 2k12R2
+    product_key: '{{ VM_parameters.product_key | default() }}'
+    secondary_iso_name: "{{ VM_parameters.vm_name | mandatory }}-install_support.iso"
+    pvscsi_img_name: "pvscsi-Windows8.flp"
+    bootstrap_files:
+    - name: Windows Management Framework v5.1
+      url: https://go.microsoft.com/fwlink/?linkid=839516
+      file: Win8.1AndW2K12R2-KB3191564-x64.msu
+
+
+  '2016':
+    box_tag: WindowsServer2016
+
+    iso_url: https://software-download.microsoft.com/download/pr/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO
+    iso_checksum: 70721288bbcdfe3239d8f8c0fae55f1f
+
+    hv_generation: 2
+    vsphere_guestid: windows9Server64Guest
+
+    iso_wim_label: Windows Server 2016 SERVERSTANDARD
+    architecture: amd64
+    answer_longhorn: no
+    skip_feature_removal: yes
+    driver_host_string: 2k16
+    # to speed the process up, you can manually find the latest KB for the
+    # following updates and put them here. Installing in the bootstrapping
+    # process is a lot faster than through the WUA. Open up
+    # https://www.catalog.update.microsoft.com/home.aspx and search for the
+    # following terms, put the download link below;
+    #
+    #     * Update for Windows Server 2016 for x64-based Systems - Critical Updates
+    #       https://www.catalog.update.microsoft.com/Search.aspx?q=Update%20for%20Windows%20Server%202016%20for%20x64-based%20Systems%20-%20Critical%20Updates
+    #     * Cumulative Update for Windows Server 2016 for x64-based Systems - Security Updates
+    #       https://www.catalog.update.microsoft.com/Search.aspx?q=Cumulative%20Update%20for%20Windows%20Server%202016%20for%20x64-based%20Systems%20-%20Security%20Updates
+    bootstrap_files:
+    - name: KB4456655
+      url: http://download.windowsupdate.com/d/msdownload/update/software/crup/2018/09/windows10.0-kb4456655-x64_fca3f0c885da48efc6f9699b0c1eaf424e779434.msu
+    - name: KB4480961
+      url: http://download.windowsupdate.com/d/msdownload/update/software/secu/2019/01/windows10.0-kb4480961-x64_ada63f8d66b2c9994e03c3f5bffe56aff77edeb6.msu
+
+  '1709':
+    box_tag: WindowsServer1709
+
+    # no evaluation ISO is available, end user must supply the path to a local ISO file
+    iso_checksum: 7c73ce30c3975652262f794fc35127b5
+    vb_guest_os_type: Windows2016_64
+    vb_forwarded_port: 55987
+    hv_generation: 2
+
+    iso_wim_label: Windows Server 2016 SERVERSTANDARDACORE
+    architecture: amd64
+    answer_longhorn: no
+    skip_feature_removal: yes
+    driver_host_string: 2k16
+    bootstrap_files: []
+
+  '1803':
+    box_tag: WindowsServer1803
+
+    # no evaluation ISO is available, end user must supply the path to a local ISO file
+    iso_checksum: e34b375e0b9438d72e6305f36b125406
+    vb_guest_os_type: Windows2016_64
+    vb_forwarded_port: 55988
+    hv_generation: 2
+
+    iso_wim_label: Windows Server 2016 SERVERSTANDARDACORE
+    architecture: amd64
+    answer_longhorn: no
+    skip_feature_removal: yes
+    driver_host_string: 2k16
+    bootstrap_files: []
+#    bootstrap_files:
+#    - name: KB4343669
+#      url: http://download.windowsupdate.com/d/msdownload/update/software/crup/2018/07/windows10.0-kb4343669-x64_2a58320e44d3ff803bc7016b5d02f3e85482b46f.msu
+#    - name: KB4338819
+#      url: http://download.windowsupdate.com/c/msdownload/update/software/secu/2018/07/windows10.0-kb4338819-x64_73cef45cbee3c689ddddf596aed7cb6a61092180.msu
+
+  '2019':
+    box_tag: WindowsServer2019
+
+    iso_url: https://software-download.microsoft.com/download/sg/17763.253.190108-0006.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso
+    iso_checksum: 48cd91270581d1be10c3ff3ad6c41cce
+    vb_guest_os_type: Windows2016_64  # TODO: change to Windows2019_64 when available
+    vb_forwarded_port: 55989
+    hv_generation: 2
+
+    iso_wim_label: Windows Server 2019 SERVERSTANDARD
+    architecture: amd64
+    answer_longhorn: no
+    skip_feature_removal: yes
+    driver_host_string: 2k16
+    bootstrap_files: []
+
+#  '10-x86':
+#    box_tag: Windows10-x86
+#
+#    iso_url: http://care.dlservice.microsoft.com/dl/download/6/5/D/65D18931-F626-4A35-AD5B-F5DA41FE6B76/16299.15.170928-1534.rs3_release_CLIENTENTERPRISEEVAL_OEMRET_x86FRE_en-us.iso
+#    iso_checksum: f2c39358d7186adae6825096c514edd6
+#    vb_guest_os_type: Windows10
+#    vb_forwarded_port: 55989
+#    hv_generation: 2
+#
+#    iso_wim_label: Windows 10 Enterprise Evaluation
+#    architecture: x86
+#    answer_longhorn: no
+#    bootstrap_files: []
+#  '10-x64':
+#    box_tag: Windows10-x64
+#
+#    iso_url: http://care.dlservice.microsoft.com/dl/download/6/5/D/65D18931-F626-4A35-AD5B-F5DA41FE6B76/16299.15.170928-1534.rs3_release_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso
+#    iso_checksum: f4f85d77516721d9a19ca866172a5ecb
+#    vb_guest_os_type: Windows10_64
+#    vb_forwarded_port: 55990
+#    hv_generation: 2
+#
+#    iso_wim_label: Windows 10 Enterprise Evaluation
+#    architecture: amd64
+#    answer_longhorn: no
+#    bootstrap_files: []

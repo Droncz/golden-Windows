@@ -1,0 +1,87 @@
+---
+# TODO: Add assertion check for the needed variables definitions
+    - name: Read vSphere access vars
+      include_vars:
+        file: access.vmware.yaml
+        name: vsphere_config
+
+    - name: Read common required VM parameters
+      include_vars:
+        file: "common_VM_parameters.yaml"
+        name: common_VM_parameters
+
+    - name: Get man_host_type from "common_VM_parameters" file if not defined on CLI
+      set_fact:
+        man_host_type: '{{ common_VM_parameters.host_type }}'
+      when: common_VM_parameters.host_type is defined and man_host_type is not defined
+
+    - name: Fail if the "man_host_type" is not yet known
+      fail:
+        msg: 'The "man_host_type" must be defined - either in "common_VM_parameters.yaml" file or as CLI parameter. For example: "-e man_host_type=2012r2"'
+      when:  man_host_type is not defined
+
+    - name: Check for existence of file with OS specific variables
+      stat:
+        path: "config/{{ man_host_type }}-VM_parameters.yaml"
+      register: OS_config_file
+
+    - name: Read the OS specific VM parameters from specific file
+      include_vars:
+        file: "{{ man_host_type }}-VM_parameters.yaml"
+        name: OS_config_VM_parameters
+      when: OS_config_file.stat.exists
+
+    - name: Merge common and OS related parameters
+      set_fact:
+        # In this form the OS_config_VM_parameters will overwrite possibly existing variables from the common_VM_parameters
+        VM_parameters: "{{ common_VM_parameters | combine(OS_config_VM_parameters) }}"
+      when: OS_config_VM_parameters is defined
+
+    - name: Show Connections parameters
+      debug:
+        var: vsphere_config
+
+    - name: Show gathered VM_parameters
+      debug:
+        var: VM_parameters
+
+    - name: Only in the provisioning phase
+      block:
+        - name: Find the new VM
+          vmware_guest_facts:
+          # vmware_guest:
+            hostname: '{{ vsphere_config.hostname }}'
+            username: '{{ vsphere_config.username }}'
+            password: '{{ vsphere_config.password }}'
+            validate_certs: '{{ vsphere_config.validate_certs }}'
+            # wait_for_ip_address: true
+
+            datacenter: '{{ vsphere_config.datacenter }}'
+            # folder: '{{ vsphere_config.folder }}'
+
+            name: '{{ VM_parameters.vm_name }}'
+            # name: "WHITE SRV git.arena.white - 192.168.12.24"
+          register: vm_facts
+          until: vm_facts.instance.ipv4 | ipv4
+          retries: 5
+          delay: 30
+          ignore_errors: yes
+
+        - name: Show the VM IP address 
+          debug:
+            var: vm_facts.instance.ipv4, vm_facts.instance.hw_eth0.ipaddresses[0]
+
+        # - name: Show the VM facts
+        #   debug:
+        #     var: vm_facts
+
+        - name: Add newly created host to Ansible inventory
+          add_host:
+            hostname: '{{ VM_parameters.vm_name }}'
+            groups:
+              - windows
+            ansible_host: "{{ vm_facts.instance.ipv4 }}"
+            # ansible_port: "{{ new_port }}"
+            # var1: aaa
+      when: hostvars['packer-host'] is defined
+

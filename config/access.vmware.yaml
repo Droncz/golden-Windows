@@ -1,0 +1,24 @@
+# In case this file is used as VMware dynamic inventory
+plugin: vmware_vm_inventory
+
+# VM placement
+datacenter: DC
+cluster: cluster
+host: vhost1.my.domain
+folder: "folder"
+
+# Access informations
+hostname: vcenter.my.domain
+insecure_connection: true
+validate_certs: false
+username: "administrator@vsphere.domain"
+password: "password"
+with_tags: False
+
+# Data storage information
+datastore: "DS"
+ISOs_folder: "ISO"
+
+# The folder with files with PVSCSI drivers. The folder will be sought for under the "ISOs_folder" in the "datastore" (both should be defined in the file with VMware access definitions).
+# The files itself are expected to use the file name pattern "pvscsi-<Windows_family>.flp". The "Windows_family" is filled by the template from the "packer-setup" play.
+pvscsi_drivers_folder: pvscsi

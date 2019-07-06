@@ -1,0 +1,21 @@
+# localhost ansible_python_interpreter=/usr/local/bin/python2 ansible_connection=local
+localhost ansible_connection=local
+
+[windows]
+packer-host
+
+[windows:vars]
+ansible_user={{ansible_user}}
+ansible_password={{ansible_password}}
+ansible_port={{pri_packer_setup_ansible_port}}
+ansible_connection=winrm
+ansible_winrm_scheme=http
+ansible_become_method=runas
+ansible_become_user=SYSTEM
+
+packer_builder="{{packer_builder}}"
+man_host_type="{{man_host_type}}"
+man_host_architecture={{pri_packer_setup_config.architecture}}
+man_skip_feature_removal={{pri_packer_setup_config.skip_feature_removal | default(False)}}
+man_personalize_choco_packages={{VM_parameters.choco_packages | default('["vim", "sysinternals"]')}}
+man_packer_windoze_version={{man_packer_setup_version | mandatory}}

@@ -1,0 +1,66 @@
+---
+- name: set fact of packer host config based on host_type
+  set_fact:
+    pri_packer_setup_config: '{{ pri_packer_setup_host_config[man_host_type] }}'
+
+- name: override iso_url with opt_packer_setup_iso_path if defined
+  set_fact:
+    pri_packer_setup_config: '{{ pri_packer_setup_config|update_dict("iso_url", opt_packer_setup_iso_path) }}'
+  when: opt_packer_setup_iso_path is defined
+
+- name: override iso_wim_label with opt_packer_setup_iso_wim_label if defined
+  set_fact:
+    pri_packer_setup_config: '{{ pri_packer_setup_config|update_dict("iso_wim_label", opt_packer_setup_iso_wim_label) }}'
+  when: opt_packer_setup_iso_wim_label is defined
+
+- name: override product_key with opt_packer_setup_product_key if defined
+  set_fact:
+    pri_packer_setup_config: '{{ pri_packer_setup_config|update_dict("product_key", opt_packer_setup_product_key) }}'
+  when: opt_packer_setup_product_key is defined
+
+- name: assert that iso_url is set or overriden with opt_packer_setup_iso_path
+  assert:
+    that:
+    - pri_packer_setup_config.iso_url is defined
+    msg: opt_packer_setup_iso_path must be defined is the URL is not supplied in the default vars
+
+- name: create Packer builder info
+  set_fact:
+    pri_packer_setup_builders: '{{ pri_packer_setup_builders_info.common|merge_dict(pri_packer_setup_builders_info[packer_builder]) }}'
+
+- name: remove ISO download info if ISO image given on datastore
+  block: 
+  - name: remove iso_url as ISO image is on the datastore
+    set_fact:
+      pri_packer_setup_builders: '{{ pri_packer_setup_builders | del_key("iso_url") }}'
+    when: pri_packer_setup_builders.iso_url is defined
+
+  - name: remove iso_checksum as ISO image is on the datastore
+    set_fact:
+      pri_packer_setup_builders: '{{ pri_packer_setup_builders | del_key("iso_checksum") }}'
+    when: pri_packer_setup_builders.iso_checksum is defined
+
+  - name: remove iso_checksum_type as ISO image is on the datastore
+    set_fact:
+      pri_packer_setup_builders: '{{ pri_packer_setup_builders | del_key("iso_checksum_type") }}'
+    when: pri_packer_setup_builders.iso_checksum_type is defined
+  when: VM_parameters.os_iso_name is defined
+
+- name: create Packer provisioner info
+  set_fact:
+    # pri_packer_setup_provisioners: '{{ pri_packer_setup_provisioners_info.common + pri_packer_setup_provisioners_info[packer_builder] }}'
+    pri_packer_setup_provisioners: '{{ pri_packer_setup_provisioners_info.common | merge_dict(pri_packer_setup_provisioners_info[packer_builder]) }}'
+
+- name: create Packer post-processors info
+  set_fact:
+    pri_packer_setup_post_processors: '{{ pri_packer_setup_post_processors_info.common|merge_dict(pri_packer_setup_post_processors_info[packer_builder]) }}'
+
+- name: set opt_packer_setup_box_tag if it isn't defined
+  set_fact:
+    opt_packer_setup_box_tag: '{{ pri_packer_setup_config.box_tag }}'
+  when: opt_packer_setup_box_tag is not defined
+
+- name: create packer.json file based on vars set
+  copy:
+    content: '{{ pri_packer_setup_json|to_nice_json }}'
+    dest: '{{ man_host_type }}/packer.json'
